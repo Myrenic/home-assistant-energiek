@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import EnergiekDataUpdateCoordinator
 
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,

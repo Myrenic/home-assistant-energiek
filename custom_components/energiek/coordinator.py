@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, date, timezone
+from datetime import datetime, timedelta
 from typing import TypedDict, Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -14,6 +14,7 @@ import homeassistant.util.dt as dt_util
 from .energiek_api import EnergiekAPI, RequestException, AuthException
 
 LOGGER = logging.getLogger(__name__)
+
 
 class PriceData:
     def __init__(self, prices: list[dict]):
@@ -28,10 +29,12 @@ class PriceData:
                 return p["price"]
         return None
 
+
 class EnergiekData(TypedDict):
     electricity: PriceData | None
     gas: PriceData | None
     tomorrow_available: bool
+
 
 class EnergiekDataUpdateCoordinator(DataUpdateCoordinator):
     """Get the latest data and update the states."""
@@ -57,6 +60,34 @@ class EnergiekDataUpdateCoordinator(DataUpdateCoordinator):
         """Get the latest data from Energiek."""
         LOGGER.debug("Fetching Energiek data")
 
+        await self._ensure_authenticated()
+
+        now = dt_util.now()
+        today_str = now.strftime("%Y-%m-%d")
+        tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        try:
+            electricity_today = await self.api.get_market_prices(today_str, "ELECTRICITY")
+            gas_today = await self.api.get_market_prices(today_str, "GAS")
+        except RequestException as ex:
+            raise UpdateFailed(ex) from ex
+
+        tomorrow_data = await self._fetch_tomorrow_data(tomorrow_str)
+
+        electricity_prices = self._parse_prices(today_str, electricity_today)
+        electricity_prices.extend(self._parse_prices(tomorrow_str, tomorrow_data["electricity"]))
+
+        gas_prices = self._parse_gas_prices(today_str, gas_today)
+        gas_prices.extend(self._parse_gas_prices(tomorrow_str, tomorrow_data["gas"]))
+
+        return {
+            "electricity": PriceData(prices=electricity_prices),
+            "gas": PriceData(prices=gas_prices),
+            "tomorrow_available": tomorrow_data["available"],
+        }
+
+    async def _ensure_authenticated(self) -> None:
+        """Ensure the API is authenticated."""
         try:
             if not self.api.is_authenticated:
                 email = self.entry.data.get("email")
@@ -67,49 +98,18 @@ class EnergiekDataUpdateCoordinator(DataUpdateCoordinator):
         except RequestException as ex:
             raise UpdateFailed(ex) from ex
 
-        now = dt_util.now()
-        today_str = now.strftime("%Y-%m-%d")
-        tomorrow = now + timedelta(days=1)
-        tomorrow_str = tomorrow.strftime("%Y-%m-%d")
-
+    async def _fetch_tomorrow_data(self, tomorrow_str: str) -> dict[str, Any]:
+        """Fetch prices for tomorrow if available."""
+        result = {"electricity": None, "gas": None, "available": False}
         try:
-            electricity_today = await self.api.get_market_prices(today_str, "ELECTRICITY")
-            gas_today = await self.api.get_market_prices(today_str, "GAS")
-        except RequestException as ex:
-            raise UpdateFailed(ex) from ex
+            elec = await self.api.get_market_prices(tomorrow_str, "ELECTRICITY")
+            gas = await self.api.get_market_prices(tomorrow_str, "GAS")
 
-        tomorrow_available = False
-        electricity_tomorrow = None
-        gas_tomorrow = None
-
-        try:
-            electricity_tomorrow = await self.api.get_market_prices(tomorrow_str, "ELECTRICITY")
-            gas_tomorrow = await self.api.get_market_prices(tomorrow_str, "GAS")
-            
-            # Energiek returns data even if empty or not fully populated. We check if there's actually series data.
-            if electricity_tomorrow and "withTotalVat" in electricity_tomorrow and len(electricity_tomorrow["withTotalVat"]["series"]) > 0:
-                tomorrow_available = True
+            if elec and "withTotalVat" in elec and len(elec["withTotalVat"]["series"]) > 0:
+                result.update({"electricity": elec, "gas": gas, "available": True})
         except RequestException as ex:
             LOGGER.debug("Tomorrow's prices not yet available: %s", ex)
-
-        electricity_prices = []
-        gas_prices = []
-
-        if electricity_today:
-            electricity_prices.extend(self._parse_prices(today_str, electricity_today))
-        if tomorrow_available and electricity_tomorrow:
-            electricity_prices.extend(self._parse_prices(tomorrow_str, electricity_tomorrow))
-
-        if gas_today:
-            gas_prices.extend(self._parse_gas_prices(today_str, gas_today))
-        if tomorrow_available and gas_tomorrow:
-            gas_prices.extend(self._parse_gas_prices(tomorrow_str, gas_tomorrow))
-
-        return {
-            "electricity": PriceData(prices=electricity_prices),
-            "gas": PriceData(prices=gas_prices),
-            "tomorrow_available": tomorrow_available,
-        }
+        return result
 
     def _parse_prices(self, date_str: str, data: dict | None) -> list[dict]:
         """Parse the 15-minute price series."""
@@ -119,18 +119,14 @@ class EnergiekDataUpdateCoordinator(DataUpdateCoordinator):
 
         series = data["withTotalVat"]["series"]
         labels = data["withTotalVat"]["labels"]
-        
-        # Local timezone parsing
-        local_tz = dt_util.get_default_time_zone()
 
         for idx, price_val in enumerate(series):
             if idx < len(labels):
-                time_str = labels[idx]["label"] # "00:00"
+                time_str = labels[idx]["label"]  # "00:00"
                 dt_str = f"{date_str} {time_str}"
-                
+
                 # Create naive datetime
                 naive_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-                
                 # Localize and convert to UTC
                 local_dt = naive_dt.replace(tzinfo=dt_util.get_default_time_zone())
                 utc_dt = dt_util.as_utc(local_dt)
@@ -143,6 +139,6 @@ class EnergiekDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _parse_gas_prices(self, date_str: str, data: dict | None) -> list[dict]:
         """Parse gas prices."""
-        # Gas prices usually have the same structure but maybe daily or hourly. Energiek API returns DAY_QUARTER as well or full day?
-        # Assuming identical structure for now. If it's different, it will be caught in testing.
+        # Gas prices usually have the same structure.
+        # Assuming identical structure for now.
         return self._parse_prices(date_str, data)

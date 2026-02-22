@@ -9,11 +9,14 @@ import yarl
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class AuthException(Exception):
     pass
 
+
 class RequestException(Exception):
     pass
+
 
 class EnergiekAPI:
     def __init__(self, session: aiohttp.ClientSession = None):
@@ -40,52 +43,59 @@ class EnergiekAPI:
             self.session = aiohttp.ClientSession()
             self._close_session = True
 
-        headers = kwargs.pop("headers", {})
-        headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json",
-            "Origin": self.base_url,
-            "Referer": f"{self.base_url}/login"
-        })
-        if self.xsrf_token:
-            headers["X-XSRF-TOKEN"] = self.xsrf_token
-
+        headers = self._prepare_headers(kwargs.pop("headers", {}))
         url = f"{self.base_url}{endpoint}"
-        
+
         try:
             async with self.session.request(method, url, headers=headers, **kwargs) as response:
-                yarl_url = yarl.URL(url)
-                if 'XSRF-TOKEN' in self.session.cookie_jar.filter_cookies(yarl_url):
-                    cookie = self.session.cookie_jar.filter_cookies(yarl_url).get('XSRF-TOKEN')
-                    if cookie:
-                        self.xsrf_token = unquote(cookie.value)
+                self._update_xsrf_token(url)
 
                 if response.status >= 400:
-                    text = await response.text()
-                    if response.status == 422 and "Geen marktprijs gevonden" in text:
-                        _LOGGER.debug(f"No market price found for {url}")
-                        return None
-                    _LOGGER.error(f"Request failed: {response.status} - {text}")
-                    if response.status in (401, 403):
-                        raise AuthException(f"Authentication failed: {response.status}")
-                    raise RequestException(f"Request failed: {response.status}")
-                
+                    return await self._handle_error(response, url)
+
                 if response.status == 204:
                     return None
-                    
+
                 # For endpoints that don't return JSON (if any)
                 content_type = response.headers.get('Content-Type', '')
                 if 'application/json' in content_type:
                     return await response.json()
-                else:
-                    return await response.text()
+                return await response.text()
         except aiohttp.ClientError as err:
             raise RequestException(f"Client error: {err}") from err
+
+    def _prepare_headers(self, custom_headers):
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+            "Origin": self.base_url,
+            "Referer": f"{self.base_url}/login"
+        }
+        headers.update(custom_headers)
+        if self.xsrf_token:
+            headers["X-XSRF-TOKEN"] = self.xsrf_token
+        return headers
+
+    def _update_xsrf_token(self, url):
+        yarl_url = yarl.URL(url)
+        if 'XSRF-TOKEN' in self.session.cookie_jar.filter_cookies(yarl_url):
+            cookie = self.session.cookie_jar.filter_cookies(yarl_url).get('XSRF-TOKEN')
+            if cookie:
+                self.xsrf_token = unquote(cookie.value)
+
+    async def _handle_error(self, response, url):
+        text = await response.text()
+        if response.status == 422 and "Geen marktprijs gevonden" in text:
+            _LOGGER.debug(f"No market price found for {url}")
+            return None
+        _LOGGER.error(f"Request failed: {response.status} - {text}")
+        if response.status in (401, 403):
+            raise AuthException(f"Authentication failed: {response.status}")
+        raise RequestException(f"Request failed: {response.status}")
 
     async def login(self, email, password):
         # 1. Get CSRF + Session
         await self._request("GET", "/api/auth/csrf")
-        
         if not self.xsrf_token:
             raise AuthException("No XSRF token received")
 
@@ -104,11 +114,9 @@ class EnergiekAPI:
 
         org = login_data.get("organizations", [{}])[0]
         self.org_uuid = org.get("uuid")
-        
         clusters = org.get("clusters", [{}])
         if not clusters:
             raise RequestException("No clusters found for user")
-            
         self.cluster = clusters[0].get("cluster")
         self.is_authenticated = True
         return login_data
@@ -135,17 +143,25 @@ async def main():
     parser = argparse.ArgumentParser(description="Energiek API CLI")
     parser.add_argument("--email", required=True, help="Energiek email")
     parser.add_argument("--password", required=True, help="Energiek password")
-    parser.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"), help="Date to fetch prices for (YYYY-MM-DD)")
-    parser.add_argument("--segment", default="ELECTRICITY", choices=["ELECTRICITY", "GAS"], help="Market segment")
-    
+    parser.add_argument(
+        "--date",
+        default=datetime.now().strftime("%Y-%m-%d"),
+        help="Date to fetch prices for (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--segment",
+        default="ELECTRICITY",
+        choices=["ELECTRICITY", "GAS"],
+        help="Market segment"
+    )
+
     args = parser.parse_args()
 
     async with EnergiekAPI() as api:
-        print(f"Logging in as {args.email}...")
         try:
             await api.login(args.email, args.password)
             print("Login successful!")
-            
+
             print(f"Fetching {args.segment} prices for {args.date}...")
             prices = await api.get_market_prices(args.date, args.segment)
             print(json.dumps(prices, indent=2))

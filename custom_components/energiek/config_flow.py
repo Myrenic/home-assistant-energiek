@@ -14,6 +14,7 @@ from .energiek_api import EnergiekAPI, AuthException
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Energiek."""
 
