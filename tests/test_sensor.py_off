@@ -1,0 +1,121 @@
+from datetime import datetime, timedelta
+from unittest.mock import patch, AsyncMock
+
+import pytest
+import pytest_asyncio
+from homeassistant import config_entries
+from homeassistant.core import HomeAssistant
+from homeassistant.util import dt
+from pytest_homeassistant_custom_component.common import (
+    async_fire_time_changed,
+    MockConfigEntry,
+)
+
+from custom_components.energiek import const
+
+@pytest.fixture
+def mock_energiek_api():
+    with patch("custom_components.energiek.EnergiekAPI", autospec=True) as mock_api_class:
+        mock_api = mock_api_class.return_value
+        mock_api.is_authenticated = True
+        mock_api.login = AsyncMock()
+        mock_api.get_market_prices = AsyncMock()
+        yield mock_api
+
+@pytest_asyncio.fixture
+async def energiek_config_entry(hass: HomeAssistant):
+    config_entry = MockConfigEntry(
+        domain=const.DOMAIN,
+        data={const.CONF_EMAIL: "test@mail.com", const.CONF_PASSWORD: "pw"},
+        unique_id="test@mail.com",
+    )
+    config_entry.add_to_hass(hass)
+    return config_entry
+
+def generate_prices_response(base_price):
+    return {
+        "withTotalVat": {
+            "series": [round(base_price + (i % 10) * 0.01, 3) for i in range(96)],
+            "labels": [{"label": f"{i//4:02d}:{i%4*15:02d}"} for i in range(96)]
+        }
+    }
+
+async def trigger_update(hass, delta_seconds=config_entries.RELOAD_AFTER_UPDATE_DELAY):
+    """Trigger a reload of the data"""
+    async_fire_time_changed(
+        hass,
+        dt.utcnow() + timedelta(seconds=delta_seconds + 1),
+    )
+    await hass.async_block_till_done()
+
+@pytest.mark.asyncio
+@patch("custom_components.energiek.coordinator.dt_util.now")
+@patch("custom_components.energiek.coordinator.dt_util.utcnow")
+async def test_sensors(
+    utcnow_mock,
+    now_mock,
+    mock_energiek_api: AsyncMock,
+    energiek_config_entry: MockConfigEntry,
+    hass: HomeAssistant,
+):
+    await hass.config.async_set_time_zone("Europe/Amsterdam")
+    
+    mock_time = datetime(2023, 1, 1, 12, 0, tzinfo=dt.get_default_time_zone())
+    now_mock.return_value = mock_time
+    utcnow_mock.return_value = dt.as_utc(mock_time)
+    
+    async def mock_get_prices(date_str, segment):
+        base = 0.2 if segment == "ELECTRICITY" else 1.2
+        if date_str == "2023-01-02":
+            base += 0.1
+        return generate_prices_response(base)
+    
+    mock_energiek_api.get_market_prices.side_effect = mock_get_prices
+
+    await hass.config_entries.async_setup(energiek_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Check the state of all sensors
+    # Electricity at 12:00 -> idx 48 => 0.2 + 8 * 0.01 = 0.28
+    elec_val = round(0.2 + (48 % 10) * 0.01, 3)
+    gas_val = round(1.2 + (48 % 10) * 0.01, 3)
+    
+    assert hass.states.get("sensor.current_electricity_price_all_in").state == str(elec_val)
+    assert hass.states.get("sensor.current_gas_price_all_in").state == str(gas_val)
+    assert hass.states.get("binary_sensor.tomorrow_prices_available").state == "on"
+    
+    # Check attributes length
+    elec_attrs = hass.states.get("sensor.current_electricity_price_all_in").attributes
+    assert len(elec_attrs["prices"]) == 192  # Today + Tomorrow
+
+@patch("custom_components.energiek.coordinator.dt_util.now")
+@patch("custom_components.energiek.coordinator.dt_util.utcnow")
+async def test_sensors_no_tomorrow(
+    utcnow_mock,
+    now_mock,
+    mock_energiek_api: AsyncMock,
+    energiek_config_entry: MockConfigEntry,
+    hass: HomeAssistant,
+):
+    await hass.config.async_set_time_zone("Europe/Amsterdam")
+    
+    mock_time = datetime(2023, 1, 1, 12, 0, tzinfo=dt.get_default_time_zone())
+    now_mock.return_value = mock_time
+    utcnow_mock.return_value = dt.as_utc(mock_time)
+    
+    async def mock_get_prices(date_str, segment):
+        if date_str == "2023-01-02":
+            return {} # Empty data for tomorrow
+        base = 0.2 if segment == "ELECTRICITY" else 1.2
+        return generate_prices_response(base)
+    
+    mock_energiek_api.get_market_prices.side_effect = mock_get_prices
+
+    await hass.config_entries.async_setup(energiek_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("binary_sensor.tomorrow_prices_available").state == "off"
+    
+    # Check attributes length
+    elec_attrs = hass.states.get("sensor.current_electricity_price_all_in").attributes
+    assert len(elec_attrs["prices"]) == 96  # Only Today
