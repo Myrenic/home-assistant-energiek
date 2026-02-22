@@ -6,12 +6,13 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DATA_API, DATA_COORDINATOR, DOMAIN
 from .coordinator import EnergiekDataUpdateCoordinator
 from .energiek_api import EnergiekAPI, AuthException
 
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS = ["sensor"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,7 +22,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     email = entry.data[CONF_EMAIL]
     password = entry.data[CONF_PASSWORD]
 
-    api = EnergiekAPI()
+    session = async_get_clientsession(hass)
+    api = EnergiekAPI(session=session)
     try:
         await api.login(email, password)
     except AuthException as ex:
