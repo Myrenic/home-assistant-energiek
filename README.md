@@ -34,28 +34,42 @@ You can use the `custom:apexcharts-card` to display the prices:
 
 ```yaml
 type: custom:apexcharts-card
-graph_span: 48h
 span:
   start: day
 now:
   show: true
   label: Nu
+  color: var(--primary-color)
 header:
   show: true
-  title: Energieprijs per kwartier (€/kwh)
+  title: Energieprijs per kwartier
+  show_states: true
+  colorize_states: true
+experimental:
+  color_threshold: true
+apex_config:
+  chart:
+    type: line
+    height: 250
+    toolbar:
+      show: false
+  stroke:
+    width: 0
+  plotOptions:
+    bar:
+      borderRadius: 0
+  yaxis:
+    forceNiceScale: true
+    decimalsInFloat: 2
+  xaxis:
+    type: datetime
+    labels:
+      datetimeUTC: false
 series:
   - entity: sensor.current_electricity_price_all_in
-    show:
-      legend_value: false
-    stroke_width: 2
-    float_precision: 3
+    extend_to: end
     type: column
-    opacity: 0.3
-    color: '#03b2cb'
-    data_generator: |
-      return entity.attributes.prices.map((record, index) => {
-        return [record.from, record.price];
-      });
+
 ```
 
 ## Credits
