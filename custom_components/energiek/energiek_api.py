@@ -108,8 +108,8 @@ class EnergiekAPI:
             "password": password,
             "remember": None
         })
-
-        if not login_data.get("success"):
+        
+        if not login_data or "organizations" not in login_data:
             raise AuthException("Login failed")
 
         org = login_data.get("organizations", [{}])[0]
