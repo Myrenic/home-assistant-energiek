@@ -1,15 +1,7 @@
 """Sensors for the Energiek integration."""
 from __future__ import annotations
 
-from homeassistant.components.sensor import (
-    SensorEntity,
-    SensorStateClass,
-    SensorDeviceClass,
-)
-from homeassistant.components.binary_sensor import (
-    BinarySensorEntity,
-    BinarySensorDeviceClass,
-)
+from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -30,7 +22,6 @@ async def async_setup_entry(
     entities = [
         EnergiekElectricityPriceSensor(coordinator),
         EnergiekGasPriceSensor(coordinator),
-        EnergiekTomorrowStatusSensor(coordinator),
     ]
 
     async_add_entities(entities)
@@ -38,6 +29,8 @@ async def async_setup_entry(
 
 class EnergiekSensorBase(CoordinatorEntity[EnergiekDataUpdateCoordinator]):
     """Base class for Energiek sensors."""
+
+    _attr_has_entity_name = False
 
     def __init__(self, coordinator: EnergiekDataUpdateCoordinator) -> None:
         """Initialize the sensor."""
@@ -53,11 +46,10 @@ class EnergiekSensorBase(CoordinatorEntity[EnergiekDataUpdateCoordinator]):
 class EnergiekElectricityPriceSensor(EnergiekSensorBase, SensorEntity):
     """Sensor for electricity prices."""
 
-    _attr_has_entity_name = True
     _attr_name = "Current Electricity Price (All-in)"
     _attr_native_unit_of_measurement = "EUR/kWh"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_icon = "mdi:lightning-bolt"
 
     def __init__(self, coordinator: EnergiekDataUpdateCoordinator) -> None:
@@ -89,11 +81,10 @@ class EnergiekElectricityPriceSensor(EnergiekSensorBase, SensorEntity):
 class EnergiekGasPriceSensor(EnergiekSensorBase, SensorEntity):
     """Sensor for gas prices."""
 
-    _attr_has_entity_name = True
     _attr_name = "Current Gas Price (All-in)"
     _attr_native_unit_of_measurement = "EUR/m³"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_icon = "mdi:fire"
 
     def __init__(self, coordinator: EnergiekDataUpdateCoordinator) -> None:
@@ -120,22 +111,3 @@ class EnergiekGasPriceSensor(EnergiekSensorBase, SensorEntity):
                 for p in prices
             ]
         return attrs
-
-
-class EnergiekTomorrowStatusSensor(EnergiekSensorBase, BinarySensorEntity):
-    """Sensor showing if tomorrow's data is available."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Tomorrow Prices Available"
-    _attr_icon = "mdi:calendar-clock"
-    _attr_device_class = BinarySensorDeviceClass.UPDATE
-
-    def __init__(self, coordinator: EnergiekDataUpdateCoordinator) -> None:
-        """Initialize the status sensor."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_tomorrow_available"
-
-    @property
-    def is_on(self) -> bool:
-        """Return true if tomorrow's prices are available."""
-        return self.coordinator.data.get("tomorrow_available", False)

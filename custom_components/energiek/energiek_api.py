@@ -108,7 +108,7 @@ class EnergiekAPI:
             "password": password,
             "remember": None
         })
-        
+
         if not login_data or "organizations" not in login_data:
             raise AuthException("Login failed")
 

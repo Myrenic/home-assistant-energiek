@@ -12,7 +12,7 @@ from .const import DATA_API, DATA_COORDINATOR, DOMAIN
 from .coordinator import EnergiekDataUpdateCoordinator
 from .energiek_api import EnergiekAPI, AuthException
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor"]
 
 _LOGGER = logging.getLogger(__name__)
 

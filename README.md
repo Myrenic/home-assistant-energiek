@@ -1,5 +1,7 @@
 # Energiek Home Assistant Integration
 
+![Energiek icon](icon.png)
+
 Home Assistant integration for tracking energy prices from [Energiek](https://mijn.energiek.nl). This integration is inspired by the Frank Energie integration.
 
 ## Features
@@ -8,6 +10,7 @@ Home Assistant integration for tracking energy prices from [Energiek](https://mi
 - **Gas Prices**: Track current and future gas prices.
 - **ApexCharts Ready**: Includes `prices` attribute for easy graphing with `apexcharts-card`.
 - **Status Indicator**: Binary sensor to show when tomorrow's prices are available.
+- **Automated CI/CD**: Linting, tests, and releases triggered after successful commits to `main`.
 
 ## Installation
 
@@ -21,6 +24,8 @@ Home Assistant integration for tracking energy prices from [Energiek](https://mi
 ### Manual
 1. Copy the `custom_components/energiek` directory to your Home Assistant `custom_components` directory.
 2. Restart Home Assistant.
+
+> Requires Home Assistant 2024.12.0 or newer.
 
 ## Configuration
 
